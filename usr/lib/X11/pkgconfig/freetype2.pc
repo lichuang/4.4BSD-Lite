@@ -1,0 +1,14 @@
+prefix=/opt/X11
+exec_prefix=/opt/X11
+libdir=/opt/X11/lib
+includedir=/opt/X11/include
+
+Name: FreeType 2
+URL: http://freetype.org
+Description: A free, high-quality, and portable font engine.
+Version: 18.6.12
+Requires:
+Requires.private: 
+Libs: -L${libdir} -lfreetype
+Libs.private: -lz -lbz2
+Cflags: -I${includedir}/freetype2

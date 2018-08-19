@@ -1,0 +1,11 @@
+prefix=/opt/X11
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+datarootdir=${prefix}/share
+datadir=${datarootdir}
+fontrootdir=/opt/X11/share/fonts
+mapdir=${fontrootdir}/util
+ 
+Name: FontUtil
+Description: Font utilities dirs
+Version: 1.3.1

@@ -1,0 +1,5 @@
+#!/bin/sh
+
+PATH="/opt/X11/bin:$PATH"
+
+exec mkfontscale -b -s -l "$@"

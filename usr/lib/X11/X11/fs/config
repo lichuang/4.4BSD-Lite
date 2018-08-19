@@ -1,0 +1,10 @@
+# X font server configuration file
+# See xfs(1) man page for more information.
+
+clone-self = on
+use-syslog = off
+catalogue = /opt/X11/share/fonts/misc/,/opt/X11/share/fonts/TTF/,/opt/X11/share/fonts/OTF/,/opt/X11/share/fonts/Type1/,/opt/X11/share/fonts/100dpi/,/opt/X11/share/fonts/75dpi/,/Library/Fonts,/System/Library/Fonts
+error-file = /var/log/xfs.log
+# in decipoints
+default-point-size = 120
+default-resolutions = 75,75,100,100

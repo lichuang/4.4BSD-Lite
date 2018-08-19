@@ -1,0 +1,11 @@
+prefix=/opt/X11
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+dridriverdir=${libdir}/dri
+
+Name: dri
+Description: Direct Rendering Infrastructure
+Version: 12.0.1
+Requires.private: 
+Cflags: -I${includedir}
