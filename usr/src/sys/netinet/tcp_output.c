@@ -87,17 +87,21 @@ tcp_output(tp)
 	 * If there is some data or critical controls (SYN, RST)
 	 * to send, then transmit; otherwise, investigate further.
 	 */
+  // 如果发送的最大序号等于最早的未确认过的序号，即不等待对端发送ACK，idle为真
 	idle = (tp->snd_max == tp->snd_una);
-	if (idle && tp->t_idle >= tp->t_rxtcur)
+	if (idle && tp->t_idle >= tp->t_rxtcur) // 如果TCP不等待对端发送ACK，而且在一个往返时间内也没有收到对端发送的其他报文段
 		/*
 		 * We have been idle for "a while" and no acks are
 		 * expected to clock out any data we send --
 		 * slow start to get ack "clock" running again.
 		 */
+    // 设置拥塞窗口为一个报文段，从而在发送下一个报文段时，强制执行慢启动算法
 		tp->snd_cwnd = tp->t_maxseg;
 again:
 	sendalot = 0;
+  // off=从发送缓存起始处算起指向第一个待发送字节的偏移量
 	off = tp->snd_nxt - tp->snd_una;
+  // 对端通知的接收窗口大小与拥塞窗口大小之间的最小值
 	win = min(tp->snd_wnd, tp->snd_cwnd);
 
 	flags = tcp_outflags[tp->t_state];
@@ -107,8 +111,8 @@ again:
 	 * and timer expired, we will send what we can
 	 * and go to transmit state.
 	 */
-	if (tp->t_force) {
-		if (win == 0) {
+	if (tp->t_force) {  // 两种可能：1.持续定时器超时 2.有带外数据需要发送
+		if (win == 0) { // win=0表示连接处于持续状态
 			/*
 			 * If we still have some data to send, then
 			 * clear the FIN bit.  Usually this would
@@ -125,15 +129,19 @@ again:
 			 * to send then the probe will be the FIN
 			 * itself.
 			 */
-			if (off < so->so_snd.sb_cc)
-				flags &= ~TH_FIN;
+			if (off < so->so_snd.sb_cc) // 此时socket的发送缓存还存在数据
+				flags &= ~TH_FIN; // 清除FIN标志
+      // win为1表示强制发送一个字节数据
 			win = 1;
-		} else {
+		} else { // win非零即有带外数据需要发送
+      // 持续定时器复位
 			tp->t_timer[TCPT_PERSIST] = 0;
+      // 指数退避算法索引置为0
 			tp->t_rxtshift = 0;
 		}
 	}
-
+  // 发送缓存中比特数和win两者的最小值减去off
+  // 减去off是因为发送缓存中许多字节已发送过
 	len = min(so->so_snd.sb_cc, win) - off;
 
 	if (len < 0) {
@@ -148,18 +156,23 @@ again:
 		 * just wait for an ACK.
 		 */
 		len = 0;
-		if (win == 0) {
+		if (win == 0) { // 如果对端通知的接收窗口为0
+      // 任何等待的重传将被取消
 			tp->t_timer[TCPT_REXMT] = 0;
+      // snx_nxt = snd_una，将指针返回发送窗口的最左端，连接进入持续状态
 			tp->snd_nxt = tp->snd_una;
 		}
 	}
-	if (len > tp->t_maxseg) {
+	if (len > tp->t_maxseg) { // 如果需要发送的数据超过了一个报文段的容量
+    // len就置为最大报文段的长度
 		len = tp->t_maxseg;
 		sendalot = 1;
 	}
+  // 如果本次输出操作未能清空发送缓存，FIN标志清除
 	if (SEQ_LT(tp->snd_nxt + len, tp->snd_una + so->so_snd.sb_cc))
 		flags &= ~TH_FIN;
 
+  // win设定为本地接收缓存中可用空间的大小，即TCP向对端通告的接收窗口的大小
 	win = sbspace(&so->so_rcv);
 
 	/*
@@ -173,19 +186,20 @@ again:
 	 * to send into a small window), then must resend.
 	 */
 	if (len) {
-		if (len == tp->t_maxseg)
+		if (len == tp->t_maxseg) // 如果发送报文段是最大长度报文段，直接发送
 			goto send;
-		if ((idle || tp->t_flags & TF_NODELAY) &&
-		    len + off >= so->so_snd.sb_cc)
+		if ((idle || tp->t_flags & TF_NODELAY) && // 如果无需等待对端的ACK（idle为真）,或Nagle算法被取消
+		    len + off >= so->so_snd.sb_cc)        // 并且TCP在清空发送缓存
 			goto send;
-		if (tp->t_force)
+		if (tp->t_force) // 如果由于持续定时器超时，或者有带外数据，强制TCP执行发送操作
 			goto send;
-		if (len >= tp->max_sndwnd / 2)
+		if (len >= tp->max_sndwnd / 2) // 
 			goto send;
-		if (SEQ_LT(tp->snd_nxt, tp->snd_max))
+		if (SEQ_LT(tp->snd_nxt, tp->snd_max)) // 重传定时器超时
 			goto send;
 	}
 
+  // 确定TCP是否必须向对端发送新的窗口通告
 	/*
 	 * Compare available window to amount of window
 	 * known to peer (as advertised window less
@@ -199,20 +213,28 @@ again:
 		 * taking into account that we are limited by
 		 * TCP_MAXWIN << tp->rcv_scale.
 		 */
+    // min(win, (long)TCP_MAXWIN << tp->rcv_scale)等于socket接收缓存可用空间大小（win）
+    // 和连接上允许的最大窗口大小之间的最小值，即TCP当前能够向对端发送的接收窗口的最大值
+    // tp->rcv_adv - tp->rcv_nxt为TCP最后一次通告的接收窗口中剩余空间的大小
+    // 以上两者相减，得到窗口已打开的字节数
 		long adv = min(win, (long)TCP_MAXWIN << tp->rcv_scale) -
 			(tp->rcv_adv - tp->rcv_nxt);
-
+    // 如果剩余的接收空间能容纳两个或两个以上的报文段，则发送窗口更新包文
 		if (adv >= (long) (2 * tp->t_maxseg))
 			goto send;
+    // 如果可用空间大于socket接收缓存的一半，则发送窗口更新报文
 		if (2 * adv >= (long) so->so_rcv.sb_hiwat)
 			goto send;
 	}
 
+  // 以下判定输出标志是否置位，要求TCP发送相关报文段
 	/*
 	 * Send if we owe peer an ACK.
 	 */
+  // 要求立即发送ACK
 	if (tp->t_flags & TF_ACKNOW)
 		goto send;
+  // 要求发送FIN或者SYN
 	if (flags & (TH_SYN|TH_RST))
 		goto send;
 	if (SEQ_GT(tp->snd_up, tp->snd_una))
@@ -222,6 +244,7 @@ again:
 	 * and we have not yet done so, or we're retransmitting the FIN,
 	 * then we need to send.
 	 */
+  // 标志带有FIN而且FIN未发送或FIN等待重传
 	if (flags & TH_FIN &&
 	    ((tp->t_flags & TF_SENTFIN) == 0 || tp->snd_nxt == tp->snd_una))
 		goto send;
@@ -248,12 +271,15 @@ again:
 	 * if window is nonzero, transmit what we can,
 	 * otherwise force out a byte.
 	 */
+  // 如果发送缓存有需要发送的数据，并且重传定时器和持续定时器都未设定
 	if (so->so_snd.sb_cc && tp->t_timer[TCPT_REXMT] == 0 &&
 	    tp->t_timer[TCPT_PERSIST] == 0) {
+    // 启动持续定时器
 		tp->t_rxtshift = 0;
 		tcp_setpersist(tp);
 	}
 
+  // 到了这里就是不需要发送数据，直接返回
 	/*
 	 * No reason to send a segment, just return.
 	 */
@@ -335,12 +361,12 @@ send:
 	 * the template for sends on this connection.
 	 */
 	if (len) {
-		if (tp->t_force && len == 1)
+		if (tp->t_force && len == 1) // t_force而且长度为1，那么可能是一个探测报文
 			tcpstat.tcps_sndprobe++;
-		else if (SEQ_LT(tp->snd_nxt, tp->snd_max)) {
+		else if (SEQ_LT(tp->snd_nxt, tp->snd_max)) { // snd_nxt小于snd_max，则是一个重传报文
 			tcpstat.tcps_sndrexmitpack++;
 			tcpstat.tcps_sndrexmitbyte += len;
-		} else {
+		} else { // 其他情况下都是正常的报文
 			tcpstat.tcps_sndpack++;
 			tcpstat.tcps_sndbyte += len;
 		}
@@ -382,6 +408,7 @@ send:
 		if (off + len == so->so_snd.sb_cc)
 			flags |= TH_PUSH;
 	} else {
+    // 以下是len为0的情况，处理不携带用户数据的TCP报文段
 		if (tp->t_flags & TF_ACKNOW)
 			tcpstat.tcps_sndacks++;
 		else if (flags & (TH_SYN|TH_FIN|TH_RST))
@@ -410,6 +437,7 @@ send:
 	 * window for use in delaying messages about window sizes.
 	 * If resending a FIN, be sure not to use a new sequence number.
 	 */
+  // 填充TCP首部剩余的字段
 	if (flags & TH_FIN && tp->t_flags & TF_SENTFIN && 
 	    tp->snd_nxt == tp->snd_max)
 		tp->snd_nxt--;
